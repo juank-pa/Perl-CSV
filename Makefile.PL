@@ -8,6 +8,6 @@ WriteMakefile(
   TEST_REQUIRES => {
     'Test::MockObject' => '0',
     'Test::MockModule' => '0',
-    'Test::Trap' => '0',
+    'Test::Class' => '0',
   },
 );
