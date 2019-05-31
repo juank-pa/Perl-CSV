@@ -17,9 +17,9 @@ $csv->each({
 my $row = $csv->readLine();
 ```
 
-There are several specialized class methods for one-statement reading or writing, described in the Specialized Methods section.
+There are several specialized class methods for one-statement reading, described in the Specialized Methods section.
 
-If a String is passed into CSV::new, it is internally opened as an IO handler.
+If a String is passed into `CSV::new`, it is internally opened as an IO handler.
 
 # Specialized Methods
 ## Reading
