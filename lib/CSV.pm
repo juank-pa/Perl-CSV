@@ -8,6 +8,8 @@ use warnings;
 use CSV::Table;
 use CSV::Row;
 
+our $VERSION = '0.001';
+
 # CLASS METHODS
 
 # Creates a new CSV instance.
