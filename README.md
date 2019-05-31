@@ -1,4 +1,4 @@
-# Perl-CSV
+# Perl-CSV [![Build Status](https://travis-ci.org/juank-pa/Perl-CSV.svg?branch=master)](https://travis-ci.org/juank-pa/Perl-CSV)
 This is a simple CSV parser library that doesn't have dependencies underneath. It provides interface to CSV files and data. It offers tools to enable you to read from Strings or IO handlers, as needed.
 
 The most generic interface of the library is:
