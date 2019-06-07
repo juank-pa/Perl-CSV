@@ -207,13 +207,6 @@ sub each
 sub headers
 {
     my $self = shift;
-    return $self->{'headers'};
-}
-
-# Returns the value osed as the headers option.
-sub useHeaders
-{
-    my $self = shift;
     return $self->{'options'}->{'headers'};
 }
 
@@ -249,7 +242,7 @@ sub _generateLine
     $self->{'_curlineno'}++;
 
     return undef if $self->skipBlanks() && scalar(@cols) == 0;
-    return $self->useHeaders() ? $self->_getCSVRow(@cols) : \@cols;
+    return $self->headers() ? $self->_getCSVRow(@cols) : \@cols;
 }
 
 sub _compactColumns
@@ -276,18 +269,11 @@ sub _getCSVRow
     my $self = shift;
     my $fields = \@_;
     # headers has been set return normal row
-    return CSV::Row->new($self->headers(), $fields) if defined($self->headers());
+    return CSV::Row->new($self->headers(), $fields) if ref($self->headers());
 
     # first row conditionals
-    my $use_headers = $self->useHeaders();
-    # headers will be either first row (if scalar given) or given hashref
-    $self->{'headers'} = ref($use_headers) ? $use_headers : $fields;
-
-    # return row only if given headers is a hashref or if it should return header rows
-    my $should_return_row = ref($use_headers) || $self->returnHeaders();
-    # the generated row is only a header if the headers option is not an arrayref
-    my $is_header = !ref($use_headers);
-    return $should_return_row ? CSV::Row->new($self->headers(), $fields, $is_header) : undef;
+    $self->{'options'}->{'headers'} = $fields;
+    return $self->returnHeaders() ? CSV::Row->new($fields, $fields, 1) : undef;
 }
 
 sub _hasOddQuotes

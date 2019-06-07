@@ -8,8 +8,6 @@ package CSV::Row;
 use strict;
 use warnings;
 
-use List::MoreUtils qw(first_index);
-
 use overload
     fallback => 1,
     '""' => sub { $_[0]->toCSV() },
@@ -92,7 +90,9 @@ sub index
 {
     my $self = shift;
     my $header = shift;
-    return first_index { $_ eq $header } @{ $self->headers() };
+    my $index = 0;
+    ($_ eq $header ? return $index : $index++) for @{ $self->headers() };
+    return -1;
 }
 
 # Returns the hashref representation of the row using the headers as keys.

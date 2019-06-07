@@ -313,8 +313,8 @@ sub test_parse_without_sub_is_a_shorcut_to_new_csv_object_and_readLines : Tests
 
     my $res = CSV->parse("a,b,c\n1,2,3", $options);
 
-    is(@params[0], "a,b,c\n1,2,3");
-    is(@params[1], $options);
+    is($params[0], "a,b,c\n1,2,3");
+    is($params[1], $options);
     is($read_lines, 1);
     is($res, $read_lines_res);
 }
@@ -331,9 +331,9 @@ sub test_parse_with_sub_is_a_shorcut_to_new_csv_object_and_each : Tests
 
     CSV->parse("a,b,c\n1,2,3", $options, $sub);
 
-    is(@params1[0], "a,b,c\n1,2,3");
-    is(@params1[1], $options);
-    is(@params2[0], $sub);
+    is($params1[0], "a,b,c\n1,2,3");
+    is($params1[1], $options);
+    is($params2[0], $sub);
 }
 
 sub test_parseline_is_a_shorcut_to_new_csv_object_and_readLine : Tests
@@ -349,8 +349,8 @@ sub test_parseline_is_a_shorcut_to_new_csv_object_and_readLine : Tests
 
     my $res = CSV->parseLine("a,b,c\n1,2,3", $options);
 
-    is(@params[0], "a,b,c\n1,2,3");
-    is(@params[1], $options);
+    is($params[0], "a,b,c\n1,2,3");
+    is($params[1], $options);
     is($read_line, 1);
     is($res, $read_line_res);
 }
@@ -368,14 +368,14 @@ sub test_foreach_is_a_shorcut_to_open_file_new_csv_object_each_and_close_file : 
 
     CSV->foreach('t/fixtures/test_csv.txt', $options, $sub);
 
-    is(ref @open_params[0], 'GLOB');
-    is(@open_params[0], @close_params[0]);
-    is(@open_params[1], '<');
-    is(@open_params[2], 't/fixtures/test_csv.txt');
+    is(ref $open_params[0], 'GLOB');
+    is($open_params[0], $close_params[0]);
+    is($open_params[1], '<');
+    is($open_params[2], 't/fixtures/test_csv.txt');
 
-    is(@params1[0], @open_params[0]);
-    is(@params1[1], $options);
-    is(@params2[0], $sub);
+    is($params1[0], $open_params[0]);
+    is($params1[1], $options);
+    is($params2[0], $sub);
 }
 
 sub test_read_is_a_shorcut_to_open_file_new_csv_object_readLines_and_close_file : Tests
@@ -391,13 +391,13 @@ sub test_read_is_a_shorcut_to_open_file_new_csv_object_readLines_and_close_file 
 
     my $res = CSV->read('t/fixtures/test_csv.txt', $options);
 
-    is(ref @open_params[0], 'GLOB');
-    is(@open_params[0], @close_params[0]);
-    is(@open_params[1], '<');
-    is(@open_params[2], 't/fixtures/test_csv.txt');
+    is(ref $open_params[0], 'GLOB');
+    is($open_params[0], $close_params[0]);
+    is($open_params[1], '<');
+    is($open_params[2], 't/fixtures/test_csv.txt');
 
-    is(@params1[0], @open_params[0]);
-    is(@params1[1], $options);
+    is($params1[0], $open_params[0]);
+    is($params1[1], $options);
     is($res, $readlines_res);
 }
 
@@ -424,7 +424,7 @@ sub test_readLine_with_headers_creates_field_csv_rows_skipping_header_row : Test
 sub test_readLine_with_headers_sets_headers_on_first_read : Tests
 {
     my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n", { 'headers' => 1 });
-    is($csv->headers(), undef);
+    is($csv->headers(), 1);
     $csv->readLine();
     is_deeply($csv->headers(), [qw(a b c)]);
 }
@@ -457,12 +457,13 @@ sub test_readLine_with_custom_headers_does_not_skip_first_row : Tests
     is($csv->readLine(), undef);
 }
 
-sub test_readLine_with_custom_headers_sets_headers_on_first_read : Tests
+sub test_readLine_with_custom_headers_uses_given_headers : Tests
 {
-    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n", { 'headers' => [qw(m mm mmm)] });
-    is($csv->headers(), undef);
+    my $headers = [qw(m mm mmm)];
+    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n", { 'headers' => $headers });
+    is($csv->headers(), $headers);
     $csv->readLine();
-    is_deeply($csv->headers(), [qw(m mm mmm)]);
+    is($csv->headers(), $headers);
 }
 
 sub test_readLines_encloses_csv_rows_in_csv_table : Tests
@@ -494,19 +495,13 @@ sub test_readLines_encloses_csv_rows_in_csv_table_without_skipping_headers : Tes
     is(scalar(@$table), 2);
 }
 
-sub test_useHeaders_returns_the_headers_options : Tests
-{
-    my $csv = CSV->new("a,b,c\n1,2,3\n", { 'headers' => 'ANY VAL' });
-    is($csv->useHeaders(), 'ANY VAL');
-}
-
 sub test_skipBlanks_returns_the_headers_options : Tests
 {
     my $csv = CSV->new("a,b,c\n1,2,3\n", { 'skip_blanks' => 'BLANK VAL' });
     is($csv->skipBlanks(), 'BLANK VAL');
 }
 
-sub test_readLine_assemblesi_and_returns_rows_with_the_right_headers_and_fields : Tests
+sub test_readLine_assembles_and_returns_rows_with_the_right_headers_and_fields : Tests
 {
     my (@rows, @params);
     push(@rows, bless({}, 'Row')) for (1..2);
@@ -516,14 +511,14 @@ sub test_readLine_assemblesi_and_returns_rows_with_the_right_headers_and_fields 
     $row_mod->mock('new', sub { shift; push(@params, [@_]);  return shift(@rows); });
 
     my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6", { 'headers' => 1 });
-    is($csv->readLine(), @expected_rows[0]);
-    is($csv->readLine(), @expected_rows[1]);
+    is($csv->readLine(), $expected_rows[0]);
+    is($csv->readLine(), $expected_rows[1]);
     is($csv->readLine(), undef);
-    is_deeply(@params[0], [[qw(a b c)], [qw(1 2 3)]]);
-    is_deeply(@params[1], [[qw(a b c)], [qw(4 5 6)]]);
+    is_deeply($params[0], [[qw(a b c)], [qw(1 2 3)]]);
+    is_deeply($params[1], [[qw(a b c)], [qw(4 5 6)]]);
 }
 
-sub test_readLine_assemblesi_and_returns_rows_with_the_right_headers_and_fields_custom_headers : Tests
+sub test_readLine_assembles_and_returns_rows_with_the_right_headers_and_fields_custom_headers : Tests
 {
     my (@rows, @params);
     push(@rows, bless({}, 'Row')) for (1..3);
@@ -533,16 +528,16 @@ sub test_readLine_assemblesi_and_returns_rows_with_the_right_headers_and_fields_
     $row_mod->mock('new', sub { shift; push(@params, [@_]);  return shift(@rows); });
 
     my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6", { 'headers' => [qw(m n o)] });
-    is($csv->readLine(), @expected_rows[0]);
-    is($csv->readLine(), @expected_rows[1]);
-    is($csv->readLine(), @expected_rows[2]);
+    is($csv->readLine(), $expected_rows[0]);
+    is($csv->readLine(), $expected_rows[1]);
+    is($csv->readLine(), $expected_rows[2]);
     is($csv->readLine(), undef);
-    is_deeply(@params[0], [[qw(m n o)], [qw(a b c)], '']);
-    is_deeply(@params[1], [[qw(m n o)], [qw(1 2 3)]]);
-    is_deeply(@params[2], [[qw(m n o)], [qw(4 5 6)]]);
+    is_deeply($params[0], [[qw(m n o)], [qw(a b c)]]);
+    is_deeply($params[1], [[qw(m n o)], [qw(1 2 3)]]);
+    is_deeply($params[2], [[qw(m n o)], [qw(4 5 6)]]);
 }
 
-sub test_readLine_assemblesi_and_returns_rows_with_the_right_headers_and_fields_return_headers : Tests
+sub test_readLine_assembles_and_returns_rows_with_the_right_headers_and_fields_return_headers : Tests
 {
     my (@rows, @params);
     push(@rows, bless({}, 'Row')) for (1..3);
@@ -552,13 +547,13 @@ sub test_readLine_assemblesi_and_returns_rows_with_the_right_headers_and_fields_
     $row_mod->mock('new', sub { shift; push(@params, [@_]);  return shift(@rows); });
 
     my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6", { 'headers' => 1, 'return_headers' => 1 });
-    is($csv->readLine(), @expected_rows[0]);
-    is($csv->readLine(), @expected_rows[1]);
-    is($csv->readLine(), @expected_rows[2]);
+    is($csv->readLine(), $expected_rows[0]);
+    is($csv->readLine(), $expected_rows[1]);
+    is($csv->readLine(), $expected_rows[2]);
     is($csv->readLine(), undef);
-    is_deeply(@params[0], [[qw(a b c)], [qw(a b c)], 1]);
-    is_deeply(@params[1], [[qw(a b c)], [qw(1 2 3)]]);
-    is_deeply(@params[2], [[qw(a b c)], [qw(4 5 6)]]);
+    is_deeply($params[0], [[qw(a b c)], [qw(a b c)], 1]);
+    is_deeply($params[1], [[qw(a b c)], [qw(1 2 3)]]);
+    is_deeply($params[2], [[qw(a b c)], [qw(4 5 6)]]);
 }
 
 Test::Class->runtests();

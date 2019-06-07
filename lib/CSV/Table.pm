@@ -8,7 +8,6 @@ package CSV::Table;
 use strict;
 use warnings;
 
-use List::Util qw(all);
 use CSV::Row;
 
 use overload
@@ -89,7 +88,9 @@ sub eq
     my @rows = @{ $self->{'_rows'} };
     my @other_rows = @{ $table->{'_rows'} };
     return 0 if scalar(@rows) != scalar(@other_rows);
-    return all { $_->eq(shift(@other_rows)) } @rows;
+
+    $_->eq(shift(@other_rows)) || return 0 for @rows;
+    return 1;
 }
 
 return 1;
