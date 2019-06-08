@@ -10,6 +10,29 @@ use CSV::Row;
 
 our $VERSION = '0.001';
 
+sub DESTROY
+{
+    my $self = shift;
+    close($self->{_io}) if $self->{_io} && $self->{_owned};
+}
+
+# Helper to get the IO handler
+sub _io
+{
+    my $self = shift;
+    my $append = shift // 0;
+    if (!defined($self->{'_io'})) {
+        if (ref($self->{'data'}) eq 'GLOB') {
+            $self->{'_io'} = $self->{'data'};
+        }
+        else {
+            open($self->{'_io'}, ($append ? '+>>' : '+<'), $self->{'data'});
+            $self->{_owned} = 1;
+        }
+    }
+    return $self->{'_io'};
+}
+
 # CLASS METHODS
 
 # Creates a new CSV instance.
@@ -31,9 +54,9 @@ our $VERSION = '0.001';
 sub new
 {
     my $class = shift;
-    my $data = shift;
+    my $data = ref($_[0]) ? $_[0] : \$_[0]; shift;
     my $options = shift // {};
-    if (ref($data) && ref($data) ne 'GLOB') {
+    if (ref($data) ne 'SCALAR' && ref($data) ne 'GLOB') {
         die('Data should be a scalar reference or a file handle'.ref($data));
     }
     my $self = bless { 'data' => $data, 'options' => $options }, $class;
@@ -91,7 +114,7 @@ sub foreach
     open(my $fh, '<', $filename) // die("Could not open file: $filename");
     my $csv = $class->new($fh, $options);
     $csv->each($sub);
-    close($fh);
+    $csv->close();
 }
 
 # Reads all files from a CSV file and returns the results. The results depend on the
@@ -108,17 +131,69 @@ sub read
     open(my $fh, '<', $filename) // die("Could not open file: $filename");
     my $csv = $class->new($fh, $options);
     my $lines = $csv->readLines();
-    close($fh);
+    $csv->close();
     return $lines;
 }
 
+sub open
+{
+    my $class = shift;
+    my $has_mode = $_[1] && !ref($_[1]);
+    splice(@_, 1, 0, '>') if !$has_mode;
+    my ($filename, $mode, $options, $sub) = @_;
+
+    open(my $fh, $mode, $filename) // die("Could not open file: $filename");
+    my $csv = $class->new($fh, $options);
+    return $csv if !ref($sub);
+    $sub->($csv);
+    $csv->close();
+}
+
+sub generate
+{
+    my $class = shift;
+    my $has_str = ref($_[2]) eq 'CODE';
+    my $str_ref;
+    if ($has_str) {
+        $str_ref = \$_[0]; shift;
+    }
+    else {
+        my $str = ''; $str_ref = \$str;
+    }
+    my $csv = $class->new($$str_ref, $_[0]);
+    $_[1]->($csv);
+    $csv->close();
+    return $$str_ref if !$has_str;
+}
+
+sub generateLine
+{
+    my $class = shift;
+    my $row = shift;
+    my $options = shift;
+    return $class->generate($options, sub { shift->addRow($row) });
+}
+
 # INSTANCE METHODS
+
+sub addRow
+{
+    my $self = shift;
+    $self->_addRow($self->headers(), 1) if ref($self->headers()) && $self->writeHeaders() && !$self->{_header_added};
+    $self->_addRow($_[0]);
+}
 
 # Returns the return_headers option
 sub returnHeaders
 {
     my $self = shift;
     return $self->{'options'}->{'return_headers'};
+}
+
+sub writeHeaders
+{
+    my $self = shift;
+    return $self->{'options'}->{'write_headers'};
 }
 
 # Returns the last non-skipped read CSV line.
@@ -143,7 +218,7 @@ sub rewind
     $self->{'_curlineno'} = 0;
     delete $self->{'headers'};
     delete $self->{'line'};
-    seek($self->{'_input'}, 0, 0) if $self->{'_input'};
+    seek($self->{'_io'}, 0, 0) if $self->{'_io'};
 }
 
 # Reads a single line CSV line and returns it. The value returned depends on the
@@ -156,7 +231,7 @@ sub readLine
     my ($line, $read_line) = ('');
     local $/ = "\n";
 
-    while ($read_line = readline($self->_input())) {
+    while ($read_line = readline($self->_io())) {
         $line .= $read_line;
         last if !$self->_hasOddQuotes($line);
     }
@@ -217,19 +292,23 @@ sub skipBlanks
     return $self->{'options'}->{'skip_blanks'};
 }
 
-# PRIVATE METHODS
-sub _input
+sub close
 {
     my $self = shift;
-    if (!defined($self->{'_input'})) {
-        if (ref($self->{'data'})) {
-            $self->{'_input'} = $self->{'data'};
-        }
-        else {
-            open($self->{'_input'}, '<', \$self->{'data'});
-        }
-    }
-    return $self->{'_input'};
+    close($self->{'_io'}) if $self->{'_io'};
+}
+
+# PRIVATE METHODS
+
+sub _addRow
+{
+    my $self = shift;
+    my $row = shift;
+    my $header = shift // 0;
+    $row = CSV::Row->new($row, $row, $header) if ref($row) ne 'CSV::Row';
+    my $input = $self->_io(1);
+    $self->{_header_added} = 1 if $header;
+    print $input $row->toCSV();
 }
 
 sub _generateLine

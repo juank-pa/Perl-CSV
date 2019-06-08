@@ -64,6 +64,7 @@ sub set_up : Test(setup => 0)
 sub tear_down : Test(teardown => 1)
 {
     clear_params();
+    unlink('t/fixtures/gen_test_csv.txt') if -e 't/fixtures/gen_test_csv.txt';
 }
 
 sub test_readLine_basic_csv : Tests
@@ -359,19 +360,20 @@ sub test_foreach_is_a_shorcut_to_open_file_new_csv_object_each_and_close_file : 
 {
     my $options = {};
     my $sub = sub {};
-    my (@params1, @params2);
+    my (@params1, @params2, $closed);
 
     my $csv_mod = Test::MockModule->new('CSV');
     my $csv_mock = Test::MockObject->new()
-        ->mock('each', sub { shift; push(@params2, @_); });
+        ->mock('each', sub { shift; push(@params2, @_); })
+        ->mock('close', sub { $closed = 1 });
     $csv_mod->mock('new', sub { shift; push(@params1, @_); return $csv_mock; });
 
     CSV->foreach('t/fixtures/test_csv.txt', $options, $sub);
 
     is(ref $open_params[0], 'GLOB');
-    is($open_params[0], $close_params[0]);
     is($open_params[1], '<');
     is($open_params[2], 't/fixtures/test_csv.txt');
+    ok($closed);
 
     is($params1[0], $open_params[0]);
     is($params1[1], $options);
@@ -382,19 +384,20 @@ sub test_read_is_a_shorcut_to_open_file_new_csv_object_readLines_and_close_file 
 {
     my $options = {};
     my $readlines_res = ['result'];
-    my @params1;
+    my (@params1, $closed);
 
     my $csv_mod = Test::MockModule->new('CSV');
     my $csv_mock = Test::MockObject->new()
-        ->mock('readLines', sub { return $readlines_res });
+        ->mock('readLines', sub { return $readlines_res })
+        ->mock('close', sub { $closed = 1 });
     $csv_mod->mock('new', sub { shift; push(@params1, @_); return $csv_mock; });
 
     my $res = CSV->read('t/fixtures/test_csv.txt', $options);
 
     is(ref $open_params[0], 'GLOB');
-    is($open_params[0], $close_params[0]);
     is($open_params[1], '<');
     is($open_params[2], 't/fixtures/test_csv.txt');
+    ok($closed);
 
     is($params1[0], $open_params[0]);
     is($params1[1], $options);
@@ -554,6 +557,252 @@ sub test_readLine_assembles_and_returns_rows_with_the_right_headers_and_fields_r
     is_deeply($params[0], [[qw(a b c)], [qw(a b c)], 1]);
     is_deeply($params[1], [[qw(a b c)], [qw(1 2 3)]]);
     is_deeply($params[2], [[qw(a b c)], [qw(4 5 6)]]);
+}
+
+sub test_creating_csv_with_string_opens_an_io_handler_for_read_write : Tests
+{
+    my $str = "test";
+    my $csv = CSV->new($str);
+    $csv->readLines();
+    $csv->close();
+    is(ref($open_params[0]), 'GLOB');
+    is($open_params[1], '+<');
+    is($open_params[2], \$str);
+}
+
+sub test_close_closes_the_io_handler : Tests
+{
+    my $csv = CSV->new("test");
+    $csv->readLines();
+    $csv->close();
+    is(ref($close_params[0]), 'GLOB');
+    is($open_params[0], $close_params[0]);
+
+    open(my $fh, '<', 't/fixtures/test_csv.txt');
+    $csv = CSV->new($fh);
+    $csv->readLines();
+    $csv->close();
+    is($close_params[0], $fh);
+}
+
+sub test_addRows_writes_into_string : Test
+{
+    my $str = '';
+    my $csv = CSV->new($str);
+    $csv->addRow([1, 2, 3]);
+    $csv->addRow(CSV::Row->new([qw(my test headers)], [4,5,6]));
+    $csv->addRow(CSV::Row->new([qw(my test headers)], [4,5,6], 1));
+    is($str, "1,2,3\n4,5,6\nmy,test,headers\n")
+}
+
+sub test_addRows_writes_into_file : Tests
+{
+    my $exists = -e 't/fixtures/gen_test_csv.txt';
+    ok(!$exists);
+
+    open(my $fh, '>', 't/fixtures/gen_test_csv.txt');
+    my $csv = CSV->new($fh);
+    $csv->addRow([1, 2, 3]);
+    $csv->addRow(CSV::Row->new([qw(my test headers)], [4,5,6]));
+    $csv->addRow(CSV::Row->new([qw(my test headers)], [4,5,6], 1));
+    close($fh);
+
+    open($fh, '<', 't/fixtures/gen_test_csv.txt');
+    local $/ = undef;
+    my $data = <$fh>;
+    is($data, "1,2,3\n4,5,6\nmy,test,headers\n");
+}
+
+sub test_addRows_relies_in_CSV_Row_for_serialization : Tests
+{
+    my $str = '';
+    my $csv = CSV->new($str);
+    my @new_params;
+    my $row1 = [1, 2, 3];
+    my $row2 = CSV::Row->new();
+
+    my $csv_mock = Test::MockObject->new()
+        ->mock('toCSV', sub { "my,test,line\n" });
+    my $row_mod = Test::MockModule->new('CSV::Row');
+    $row_mod->mock('new', sub { push(@new_params, @_); return $csv_mock; });
+    $row_mod->mock('toCSV', sub { 'my,second,line' });
+
+    $csv->addRow($row1);
+    $csv->addRow($row2);
+
+    is($str, "my,test,line\nmy,second,line");
+    is($new_params[1], $row1);
+    is($new_params[2], $row1);
+    is($new_params[3], 0);
+}
+
+sub test_open_opens_a_file_in_write_mode_passed_csv_instance_to_the_sub_and_closes : Tests
+{
+    my $options = {};
+    my @steps;
+    my @params;
+
+    my $csv_mod = Test::MockModule->new('CSV');
+    my $csv_mock = Test::MockObject->new()
+        ->mock('close', sub { push(@steps, 'closed') });
+    $csv_mod->mock('new', sub { shift; push(@params, @_); return $csv_mock; });
+
+    CSV->open('t/fixtures/gen_test_csv.txt', $options, sub {
+        push(@steps, shift);
+    });
+
+    is(ref $open_params[0], 'GLOB');
+    is($open_params[1], '>');
+    is($open_params[2], 't/fixtures/gen_test_csv.txt');
+
+    is($params[0], $open_params[0]);
+    is($params[1], $options);
+    is($steps[0], $csv_mock);
+    is($steps[1], 'closed');
+
+    (@params, @steps) = ();
+    clear_params();
+
+    CSV->open('t/fixtures/gen_test_csv.txt', undef, sub {
+        push(@steps, shift);
+    });
+
+    is(ref $open_params[0], 'GLOB');
+    is($open_params[1], '>');
+    is($open_params[2], 't/fixtures/gen_test_csv.txt');
+
+    is($params[0], $open_params[0]);
+    is($params[1], undef);
+    is($steps[0], $csv_mock);
+    is($steps[1], 'closed');
+}
+
+sub test_open_opens_a_file_in_write_mode_and_returns_csv_instance_if_no_sub : Tests
+{
+    my $options = {};
+    my (@params, $closed);
+
+    my $csv_mod = Test::MockModule->new('CSV');
+    my $csv_mock = Test::MockObject->new()
+        ->mock('close', sub { $closed = 1 });
+    $csv_mod->mock('new', sub { shift; push(@params, @_); return $csv_mock; });
+
+    my $csv = CSV->open('t/fixtures/gen_test_csv.txt', $options);
+
+    is(ref $open_params[0], 'GLOB');
+    is($open_params[1], '>');
+    is($open_params[2], 't/fixtures/gen_test_csv.txt');
+
+    is($params[0], $open_params[0]);
+    is($params[1], $options);
+    ok(!$closed);
+    is($csv, $csv_mock);
+
+    @params = ();
+    $closed = 0;
+    clear_params();
+
+    $csv = CSV->open('t/fixtures/gen_test_csv.txt');
+
+    is(ref $open_params[0], 'GLOB');
+    is($open_params[1], '>');
+    is($open_params[2], 't/fixtures/gen_test_csv.txt');
+
+    is($params[0], $open_params[0]);
+    is($params[1], undef);
+    ok(!$closed);
+    is($csv, $csv_mock);
+}
+
+sub test_generate_generates_a_csv_string : Tests
+{
+    my $str = CSV->generate(undef, sub {
+        my $csv = shift;
+        $csv->addRow([1,2,3]);
+        $csv->addRow([qw(a b c)]);
+    });
+    is($str, "1,2,3\na,b,c\n");
+}
+
+sub test_generate_appends_a_csv_to_an_existing_string : Tests
+{
+    my $str = "Previous Content\n";
+    CSV->generate($str, undef, sub {
+        my $csv = shift;
+        $csv->addRow([1,2,3]);
+        $csv->addRow([qw(a b c)]);
+    });
+    is($str, "Previous Content\n1,2,3\na,b,c\n");
+}
+
+sub test_generateLine_is_a_shortcut_to_generate_a_single_row : Tests
+{
+    my $str = CSV->generateLine([qw(x y z)]);
+    is($str, "x,y,z\n");
+}
+
+sub test_generate_generates_a_csv_string_with_headers : Tests
+{
+    my $str = "Previous Content\n";
+    CSV->generate($str, { headers => ['x,', 'y', 'z'], write_headers => 1 }, sub {
+        my $csv = shift;
+        $csv->addRow([1,2,3]);
+        $csv->addRow([qw(a b c)]);
+    });
+    is($str, "Previous Content\n\"x,\",y,z\n1,2,3\na,b,c\n");
+
+    $str = CSV->generate({ headers => [qw(x y z)], write_headers => 1 }, sub {
+        my $csv = shift;
+        $csv->addRow([1,2,3]);
+        $csv->addRow([qw(a b c)]);
+    });
+    is($str, "x,y,z\n1,2,3\na,b,c\n");
+
+    $str = CSV->generateLine([8,9,0], { headers => [qw(a b c)], write_headers => 1 });
+    is($str, "a,b,c\n8,9,0\n");
+}
+
+sub test_open_writes_a_csv_file_with_headers : Tests
+{
+    open(my $fh, '>', 't/fixtures/gen_test_csv.txt');
+    print $fh "Previous content\n";
+    close($fh);
+
+    CSV->open('t/fixtures/gen_test_csv.txt', { headers => [qw(x y z)], write_headers => 1 }, sub {
+        my $csv = shift;
+        $csv->addRow([1,2,3]);
+        $csv->addRow([qw(a b c)]);
+    });
+
+    open($fh, '<', 't/fixtures/gen_test_csv.txt');
+    local $/ = undef;
+    my $str = <$fh>;
+    is($str, "x,y,z\n1,2,3\na,b,c\n");
+}
+
+sub test_open_appends_to_a_csv_file : Tests
+{
+    open(my $fh, '>', 't/fixtures/gen_test_csv.txt');
+    print $fh "Previous content\n";
+    close($fh);
+
+    CSV->open('t/fixtures/gen_test_csv.txt', '>>', {}, sub {
+        my $csv = shift;
+        $csv->addRow([1,2,3]);
+    });
+
+    open($fh, '<', 't/fixtures/gen_test_csv.txt');
+    local $/ = undef;
+    my $str = <$fh>;
+    is($str, "Previous content\n1,2,3\n");
+
+    my $csv = CSV->open('t/fixtures/gen_test_csv.txt', '>>');
+    $csv->addRow([qw(a b c)]);
+    $csv->close();
+
+    open($fh, '<', 't/fixtures/gen_test_csv.txt');
+    $str = <$fh>;
+    is($str, "Previous content\n1,2,3\na,b,c\n");
 }
 
 Test::Class->runtests();
