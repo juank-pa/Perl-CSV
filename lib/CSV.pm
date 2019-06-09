@@ -16,28 +16,22 @@ sub DESTROY
     close($self->{_io}) if $self->{_io} && $self->{_owned};
 }
 
-# Helper to get the IO handler
-sub _io
+# PRE-DECLARATIONS
+
+sub _open
 {
-    my $self = shift;
-    my $append = shift // 0;
-    if (!defined($self->{'_io'})) {
-        if (ref($self->{'data'}) eq 'GLOB') {
-            $self->{'_io'} = $self->{'data'};
-        }
-        else {
-            open($self->{'_io'}, ($append ? '+>>' : '+<'), $self->{'data'});
-            $self->{_owned} = 1;
-        }
-    }
-    return $self->{'_io'};
+    my $options = shift // {};
+    my $encoding = $options->{encoding} ? ":encoding($options->{encoding})" : '';
+    open(my $fh, "$_[0]$encoding", $_[1]) // die("Could not open: $_[1]");
+    return $fh;
 }
 
 # CLASS METHODS
 
 # Creates a new CSV instance.
 # @params
-#   @data     A string or file handler to use for CSV parsing
+#   @data     A string or file handler to use for CSV parsing. The file handler should be already
+#             opened for writing or reading depending and the expected CSV functionality.
 #   @options  A hashref with CSV options
 #     {
 #       headers => If a scalar is provided then: if the scalar value is truthy it will use the
@@ -45,12 +39,16 @@ sub _io
 #                  a falsey value will generate rows as arrayrefs.
 #                  If an arrayref is provided it will be used as the headers for the generated
 #                  CSV::Row row instances keeping the first row as non-header.
-#       return_headers => This option only has effect when headers is a truthy value scalar.
+#       return_headers => This option only has effect when headers is a truthy scalar value.
 #                         If truthy it will return the headers rows (first row) when parsing.
 #                         A falsey value will skip this rows. Default value is falsey.
+#       write_headers => If thruthy and headers is a hashref it will write the headers into the
+#                        CSV file or string before the first CSV line. Default value is falsey.
 #       skip_blanks => If truthy the parser will skip CSV blank lines. Note the parser will
 #                      still parse rows with all fields blank e.g. ,,,
 #     }
+# @returns
+#   The CSV instance.
 sub new
 {
     my $class = shift;
@@ -59,7 +57,8 @@ sub new
     if (ref($data) ne 'SCALAR' && ref($data) ne 'GLOB') {
         die('Data should be a scalar reference or a file handle'.ref($data));
     }
-    my $self = bless { 'data' => $data, 'options' => $options }, $class;
+    my $self = bless { data => $data, options => $options }, $class;
+    $self->{_custom_headers} = ref($options->{headers});
     $self->rewind();
     return $self;
 }
@@ -83,11 +82,13 @@ sub parse
     $csv->each($sub);
 }
 
-# Parse one the first row of the provided CSV string. The result depends on the headers
-# options. See readLine.
+# Parse only the first row of the provided CSV string. See readLine.
 # @params
 #   @str      The CSV string to be parsed.
 #   @options  A hashref with CSV options. See new for an options reference.
+# @returns
+#   Either an arrayref representing the CSV line or a CSV::Row instance depending on the headers
+#   option value.
 sub parseLine
 {
     my $class = shift;
@@ -102,7 +103,9 @@ sub parseLine
 # and closes it down when finished, so there is no need to worry about that.
 # @params
 #   @filename The path to the CSV file to be parsed.
-#   @options  A hashref with CSV options. See new for an options reference.
+#   @options  A hashref with CSV options. See new for an options reference. Additionally the
+#             options can support an encoding option where you can specify the input encoding
+#             using any of the available perl encoding strings.
 #   @sub      The CSV file rows will be parsed one by one and sent to the function as parameter.
 sub foreach
 {
@@ -111,30 +114,52 @@ sub foreach
     my $options = shift;
     my $sub = shift;
 
-    open(my $fh, '<', $filename) // die("Could not open file: $filename");
+    my $fh = _open($options, '<', $filename);
     my $csv = $class->new($fh, $options);
     $csv->each($sub);
     $csv->close();
 }
 
-# Reads all files from a CSV file and returns the results. The results depend on the
-# headers option. See readLines.
+# Reads all lines from a CSV file and returns the results. See readLines.
 # @params
 #   @filename The path to the CSV file to be parsed.
-#   @options  A hashref with CSV options. See new for an options reference.
+#   @options  A hashref with CSV options. See new for an options reference. Additionally the
+#             options can support an encoding option where you can specify the input encoding
+#             using any of the available perl encoding strings.
+# @returns
+#   Returns either a hashref of hashrefs or a CSV::Table instance depending on the headers
+#   option value.
 sub read
 {
     my $class = shift;
     my $filename = shift;
     my $options = shift;
 
-    open(my $fh, '<', $filename) // die("Could not open file: $filename");
+    my $fh = _open($options, '<', $filename);
     my $csv = $class->new($fh, $options);
     my $lines = $csv->readLines();
     $csv->close();
     return $lines;
 }
 
+# Opens a file for CSV writing.
+# @variations
+#   open(@filename, @options, @sub)
+#   open(@filename, @mode, @options, @sub)
+#   open(@filename, @options)
+#   open(@filename, @mode, @options)
+# @params
+#   @filename The path to the file to write the CSV into
+#   @mode     The mode used to open the file. By default the mode is '>' but you can use any of
+#             the modes supported by the open function. For example to append use '>>'.
+#   @options  A hashref with CSV options. See new for an options reference. Additionally the
+#             options can support an encoding option where you can specify the input encoding
+#             using any of the available perl encoding strings.
+#   @sub      A block of code used to write the CSV file. The block will receive a CSV instance
+#             as parameter. You can use the CSV::addRow method to add rows to the instance. If a
+#             block is not provided then the CSV instance is returned and will not be closed.
+# @returns
+#   undef if the @sub parameter is provided or the unclosed CSV instance.
 sub open
 {
     my $class = shift;
@@ -142,30 +167,56 @@ sub open
     splice(@_, 1, 0, '>') if !$has_mode;
     my ($filename, $mode, $options, $sub) = @_;
 
-    open(my $fh, $mode, $filename) // die("Could not open file: $filename");
+    my $fh = _open($options, $mode, $filename);
     my $csv = $class->new($fh, $options);
     return $csv if !ref($sub);
     $sub->($csv);
     $csv->close();
 }
 
+# Generates or appends to a string the CSV generated in the given code block.
+# @variations
+#   generate(@str, @options, @sub)
+#   generate(@options, @sub)
+# @params
+#   @str      An string into which to append the CSVi results.
+#   @options  A hashref with CSV options. See new for an options reference. Additionally the
+#             options can support an encoding option where you can specify the input encoding
+#             using any of the available perl encoding strings. This option will only be used
+#             for the returned string when @str parameter is not sent to the method.
+#   @sub      A block of code used to write the CSV file. The block will receive a CSV instance
+#             as parameter. You can use the CSV::addRow method to add rows to the instance.
+# @returns
+#   If the @str parameter is not sent then it returns the generated CSV as a string.
 sub generate
 {
     my $class = shift;
     my $has_str = ref($_[2]) eq 'CODE';
-    my $str_ref;
+    my ($str, $options, $sub, $csv) = ('');
     if ($has_str) {
-        $str_ref = \$_[0]; shift;
+        (undef, $options, $sub) = @_;
+        $csv = $class->new($_[0], $options);
     }
     else {
-        my $str = ''; $str_ref = \$str;
+        ($options, $sub) = @_;
+        $csv = $class->new(_open($options, '>>', \$str), $options);
     }
-    my $csv = $class->new($$str_ref, $_[0]);
-    $_[1]->($csv);
+    $sub->($csv);
     $csv->close();
-    return $$str_ref if !$has_str;
+    return $str if !$has_str;
 }
 
+# This is a shortcut to using the generate method and adding a single CSV row.
+# @variations
+#   generate(@str, @options, @sub)
+#   generate(@options, @sub)
+# @params
+#   @row      An arrayref with the row values or an instance of CSV::Row.
+#   @options  A hashref with CSV options. See new for an options reference. Additionally the
+#             options can support an encoding option where you can specify the input encoding
+#             using any of the available perl encoding strings.
+# @returns
+#   The generated CSV row as a string.
 sub generateLine
 {
     my $class = shift;
@@ -176,49 +227,67 @@ sub generateLine
 
 # INSTANCE METHODS
 
+# Main way of writing rows to the CSV file or string.
+# @params
+#   @row A hashref with the CSV row values or an instance of CSV::Row.
 sub addRow
 {
     my $self = shift;
-    $self->_addRow($self->headers(), 1) if ref($self->headers()) && $self->writeHeaders() && !$self->{_header_added};
+    $self->_addRow($self->headers, 1) if ref($self->headers) && $self->writeHeaders && !$self->{_header_added};
     $self->_addRow($_[0]);
 }
 
-# Returns the return_headers option
+# Returns the return_headers option.
 sub returnHeaders
 {
     my $self = shift;
-    return $self->{'options'}->{'return_headers'};
+    return $self->{options}->{return_headers};
 }
 
+# Returns truthy if the next row read will be a header row.
+sub isHeaderRow
+{
+    my $self = shift;
+    return $self->headers && !ref($self->headers) && $self->returnHeaders;
+}
+
+# Returns the write_headers option.
 sub writeHeaders
 {
     my $self = shift;
-    return $self->{'options'}->{'write_headers'};
+    return $self->{options}->{write_headers};
 }
 
-# Returns the last non-skipped read CSV line.
+# Returns the encoding option.
+sub encoding
+{
+    my $self = shift;
+    return $self->{options}->{encoding};
+}
+
+# Returns the last non-skipped read CSV line as a string.
 sub line
 {
     my $self = shift;
-    return $self->{'line'};
+    return $self->{line};
 }
 
 # Returns the line number of the last non-skipped read CSV line.
 sub lineno
 {
     my $self = shift;
-    return $self->{'lineno'};
+    return $self->{lineno};
 }
 
-# Rewinds the parsing to the start of the data
+# Rewinds the parsing to the start of the data. Does not make sense when writing.
 sub rewind
 {
     my $self = shift;
-    $self->{'lineno'} = 0;
-    $self->{'_curlineno'} = 0;
-    delete $self->{'headers'};
-    delete $self->{'line'};
-    seek($self->{'_io'}, 0, 0) if $self->{'_io'};
+    $self->{lineno} = 0;
+    $self->{_curlineno} = 0;
+    $self->{options}->{headers} = 1 if ref($self->headers) && !$self->{_custom_headers};
+    delete $self->{line};
+    seek($self->{_io}, 0, 0) if $self->{_io};
 }
 
 # Reads a single line CSV line and returns it. The value returned depends on the
@@ -231,7 +300,7 @@ sub readLine
     my ($line, $read_line) = ('');
     local $/ = "\n";
 
-    while ($read_line = readline($self->_io())) {
+    while ($read_line = readline($self->_io)) {
         $line .= $read_line;
         last if !$self->_hasOddQuotes($line);
     }
@@ -240,8 +309,8 @@ sub readLine
     my $row = $self->_generateLine($line);
     goto &readLine if !$row;
 
-    $self->{'lineno'} = $self->{'_curlineno'};
-    $self->{'line'} = $line;
+    $self->{lineno} = $self->{_curlineno};
+    $self->{line} = $line;
     return $row;
 }
 
@@ -259,7 +328,7 @@ sub readLines
         push(@lines, $line);
     });
 
-    return $self->{'options'}->{'headers'} ? CSV::Table->new(\@lines) : \@lines;
+    return $self->headers ? CSV::Table->new(\@lines) : \@lines;
 }
 
 # Read all lines in the CSV and passes them one by one to the function. The type of the
@@ -282,23 +351,41 @@ sub each
 sub headers
 {
     my $self = shift;
-    return $self->{'options'}->{'headers'};
+    return $self->{options}->{headers};
 }
 
-# Returns the value used as the skip_blanks option.
+# Returns the value of the skip_blanks option.
 sub skipBlanks
 {
     my $self = shift;
-    return $self->{'options'}->{'skip_blanks'};
+    return $self->{options}->{skip_blanks};
 }
 
+# Closes the handler used to read or write the CSV.
 sub close
 {
     my $self = shift;
-    close($self->{'_io'}) if $self->{'_io'};
+    close($self->{_io}) if $self->{_io};
 }
 
 # PRIVATE METHODS
+
+# Helper to get the IO handler
+sub _io
+{
+    my $self = shift;
+    my $append = shift // 0;
+    if (!defined($self->{_io})) {
+        if (ref($self->{data}) eq 'GLOB') {
+            $self->{_io} = $self->{data};
+        }
+        else {
+            $self->{_io} = _open(undef, ($append ? '+>>' : '+<'), $self->{data});
+            $self->{_owned} = 1;
+        }
+    }
+    return $self->{_io};
+}
 
 sub _addRow
 {
@@ -306,9 +393,9 @@ sub _addRow
     my $row = shift;
     my $header = shift // 0;
     $row = CSV::Row->new($row, $row, $header) if ref($row) ne 'CSV::Row';
-    my $input = $self->_io(1);
     $self->{_header_added} = 1 if $header;
-    print $input $row->toCSV();
+    my $io = $self->_io(1);
+    print $io $row->toCSV();
 }
 
 sub _generateLine
@@ -318,10 +405,10 @@ sub _generateLine
     chomp($line);
 
     my @cols = $self->_compactColumns(split(',', $line, -1));
-    $self->{'_curlineno'}++;
+    $self->{_curlineno}++;
 
-    return undef if $self->skipBlanks() && scalar(@cols) == 0;
-    return $self->headers() ? $self->_getCSVRow(@cols) : \@cols;
+    return undef if $self->skipBlanks && scalar(@cols) == 0;
+    return $self->headers ? $self->_getCSVRow(@cols) : \@cols;
 }
 
 sub _compactColumns
@@ -348,11 +435,11 @@ sub _getCSVRow
     my $self = shift;
     my $fields = \@_;
     # headers has been set return normal row
-    return CSV::Row->new($self->headers(), $fields) if ref($self->headers());
+    return CSV::Row->new($self->headers, $fields) if ref($self->headers);
 
     # first row conditionals
-    $self->{'options'}->{'headers'} = $fields;
-    return $self->returnHeaders() ? CSV::Row->new($fields, $fields, 1) : undef;
+    $self->{options}->{headers} = $fields;
+    return $self->returnHeaders ? CSV::Row->new($fields, $fields, 1) : undef;
 }
 
 sub _hasOddQuotes

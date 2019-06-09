@@ -155,7 +155,7 @@ sub test_readLine_skips_empty_lines : Tests
         '',
         ''
     );
-    my $csv = CSV->new(join("\n", @rows), { 'skip_blanks' => 1 });
+    my $csv = CSV->new(join("\n", @rows), { skip_blanks => 1 });
     is_deeply($csv->readLine(), [qw(a b c)]);
     is_deeply($csv->readLine(), [qw(4 5 6)]);
     is($csv->readLine(), undef);
@@ -186,6 +186,26 @@ sub test_rewind_restarts_csv_parsing : Tests
     $csv->rewind();
     is_deeply($csv->readLine(), ['a','b','c']);
     is_deeply($csv->readLine(), [1,2,3]);
+
+    # with first-line headers
+    $csv = CSV->new(join("\n", @rows), { headers => 1 });
+    is($csv->headers(), 1);
+    is_deeply($csv->readLine()->fields, [1,2,3]);
+    is_deeply($csv->headers, [qw(a b c)]);
+    $csv->rewind();
+    is($csv->headers, 1);
+    is_deeply($csv->readLine()->fields, [1,2,3]);
+    is_deeply($csv->headers, [qw(a b c)]);
+
+    # with custom headers
+    $csv = CSV->new(join("\n", @rows), { headers => [qw(x y z)] });
+    is_deeply($csv->headers, [qw(x y z)]);
+    is_deeply($csv->readLine()->fields, [qw(a b c)]);
+    is_deeply($csv->headers, [qw(x y z)]);
+    $csv->rewind();
+    is_deeply($csv->headers, [qw(x y z)]);
+    is_deeply($csv->readLine()->fields, [qw(a b c)]);
+    is_deeply($csv->headers, [qw(x y z)]);
 }
 
 sub test_readLines_calls_readLine_repeatedly_until_undef_and_adds_to_array : Test
@@ -217,50 +237,84 @@ sub test_line_returns_the_last_parsed_line : Tests
 {
     my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n");
     $csv->readLine();
-    is_deeply($csv->line(), "a,b,c\n");
+    is_deeply($csv->line, "a,b,c\n");
     $csv->readLine();
-    is_deeply($csv->line(), "1,2,3\n");
+    is_deeply($csv->line, "1,2,3\n");
     $csv->readLine();
-    is_deeply($csv->line(), "4,5,6\n");
+    is_deeply($csv->line, "4,5,6\n");
     is($csv->readLine(), undef);
-    is_deeply($csv->line(), "4,5,6\n");
+    is_deeply($csv->line, "4,5,6\n");
 }
 
 sub test_lineno_returns_the_last_parsed_line_number : Tests
 {
     my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6");
     $csv->readLine();
-    is($csv->lineno(), 1);
+    is($csv->lineno, 1);
     $csv->readLine();
-    is($csv->lineno(), 2);
+    is($csv->lineno, 2);
     $csv->readLine();
-    is($csv->lineno(), 3);
+    is($csv->lineno, 3);
     is($csv->readLine(), undef);
-    is($csv->lineno(), 3);
+    is($csv->lineno, 3);
 }
 
 sub test_line_and_lineno_returns_the_last_non_skipped_line : Tests
 {
     my $csv = CSV->new("a,b,c\n\n1,2,3\n\n\n", { skip_blanks => 1 });
     $csv->readLine();
-    is($csv->lineno(), 1);
-    is_deeply($csv->line(), "a,b,c\n");
+    is($csv->lineno, 1);
+    is_deeply($csv->line, "a,b,c\n");
     $csv->rewind();
     $csv->readLine();
-    is($csv->lineno(), 1);
-    is_deeply($csv->line(), "a,b,c\n");
+    is($csv->lineno, 1);
+    is_deeply($csv->line, "a,b,c\n");
     $csv->readLine();
-    is($csv->lineno(), 3);
-    is_deeply($csv->line(), "1,2,3\n");
+    is($csv->lineno, 3);
+    is_deeply($csv->line, "1,2,3\n");
     is($csv->readLine(), undef);
-    is($csv->lineno(), 3);
-    is_deeply($csv->line(), "1,2,3\n");
+    is($csv->lineno, 3);
+    is_deeply($csv->line, "1,2,3\n");
+}
+
+sub test_headers_returns_headers_option : Tests
+{
+    is(CSV->new("a,b,c\n", { headers => 1 })->headers, 1);
+    my $headers = [1,2,3];
+    is_deeply(CSV->new("a,b,c\n", { headers => $headers })->headers, $headers);
+    is(CSV->new("a,b,c\n")->headers, undef);
+}
+
+sub test_headers_returns_the_header_list_after_it_has_been_read : Tests
+{
+    my $csv = CSV->new("a,b,c\n1,2,3\n", { headers => 1 });
+    is($csv->headers, 1);
+    $csv->readLine();
+    is_deeply($csv->headers, [qw(a b c)]);
+}
+
+sub test_isHeaderRow_returns_truthy_when_next_line_to_be_parsed_is_a_header : Tests
+{
+    my $csv = CSV->new("a,b,c\n1,2,3\n", { headers => 1 });
+    ok(!$csv->isHeaderRow);
+    $csv->readLine();
+    ok(!$csv->isHeaderRow);
+
+    $csv = CSV->new("a,b,c\n1,2,3\n", { headers => 1, return_headers => 1 });
+    ok($csv->isHeaderRow);
+    $csv->readLine();
+    ok(!$csv->isHeaderRow);
+
+    $csv = CSV->new("a,b,c\n1,2,3\n", { headers => [qw(x y z)], return_headers => 1 });
+    ok(!$csv->isHeaderRow);
+    $csv->readLine();
+    ok(!$csv->isHeaderRow);
 }
 
 sub test_returnHeaders_returns_return_headers_option : Tests
 {
-    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6", {'return_headers' => 'OPT VAL'});
-    is($csv->returnHeaders(), 'OPT VAL');
+    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6", {return_headers => 'OPT VAL'});
+    is($csv->returnHeaders, 'OPT VAL');
 }
 
 sub test_each_calls_readLine_repeatedly_until_undef_and_passes_to_sub : Tests
@@ -406,102 +460,102 @@ sub test_read_is_a_shorcut_to_open_file_new_csv_object_readLines_and_close_file 
 
 sub test_readLine_with_headers_return_instances_of_csv_row : Tests
 {
-    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n", { 'headers' => 1 });
+    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n", { headers => 1 });
     is(ref $csv->readLine(), 'CSV::Row');
 }
 
 sub test_readLine_with_headers_creates_field_csv_rows_skipping_header_row : Tests
 {
-    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n", { 'headers' => 1 });
+    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n", { headers => 1 });
     my $row = $csv->readLine();
-    is_deeply($row->fields(), [qw(1 2 3)]);
-    is_deeply($row->headers(), [qw(a b c)]);
-    ok($row->isFieldRow());
+    is_deeply($row->fields, [qw(1 2 3)]);
+    is_deeply($row->headers, [qw(a b c)]);
+    ok($row->isFieldRow);
     $row = $csv->readLine();
-    is_deeply($row->fields(), [qw(4 5 6)]);
-    is_deeply($row->headers(), [qw(a b c)]);
-    ok($row->isFieldRow());
+    is_deeply($row->fields, [qw(4 5 6)]);
+    is_deeply($row->headers, [qw(a b c)]);
+    ok($row->isFieldRow);
     is($csv->readLine(), undef);
 }
 
 sub test_readLine_with_headers_sets_headers_on_first_read : Tests
 {
-    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n", { 'headers' => 1 });
-    is($csv->headers(), 1);
+    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n", { headers => 1 });
+    is($csv->headers, 1);
     $csv->readLine();
-    is_deeply($csv->headers(), [qw(a b c)]);
+    is_deeply($csv->headers, [qw(a b c)]);
 }
 
 sub test_readLine_with_headers_and_return_headers_set_to_true_does_not_skip_header_row : Tests
 {
-    my $csv = CSV->new("a,b,c\n1,2,3\n", { 'headers' => 1, 'return_headers' => 1 });
+    my $csv = CSV->new("a,b,c\n1,2,3\n", { headers => 1, return_headers => 1 });
     my $row = $csv->readLine();
-    is_deeply($row->fields(), [qw(a b c)]);
-    is_deeply($row->headers(), [qw(a b c)]);
-    ok($row->isHeaderRow());
+    is_deeply($row->fields, [qw(a b c)]);
+    is_deeply($row->headers, [qw(a b c)]);
+    ok($row->isHeaderRow);
     $row = $csv->readLine();
-    is_deeply($row->fields(), [qw(1 2 3)]);
-    is_deeply($row->headers(), [qw(a b c)]);
-    ok($row->isFieldRow());
+    is_deeply($row->fields, [qw(1 2 3)]);
+    is_deeply($row->headers, [qw(a b c)]);
+    ok($row->isFieldRow);
     is($csv->readLine(), undef);
 }
 
 sub test_readLine_with_custom_headers_does_not_skip_first_row : Tests
 {
-    my $csv = CSV->new("a,b,c\n1,2,3\n", { 'headers' => [qw(m mm mmm)] });
+    my $csv = CSV->new("a,b,c\n1,2,3\n", { headers => [qw(m mm mmm)] });
     my $row = $csv->readLine();
-    is_deeply($row->fields(), [qw(a b c)]);
-    is_deeply($row->headers(), [qw(m mm mmm)]);
-    ok($row->isFieldRow());
+    is_deeply($row->fields, [qw(a b c)]);
+    is_deeply($row->headers, [qw(m mm mmm)]);
+    ok($row->isFieldRow);
     $row = $csv->readLine();
-    is_deeply($row->fields(), [qw(1 2 3)]);
-    is_deeply($row->headers(), [qw(m mm mmm)]);
-    ok($row->isFieldRow());
+    is_deeply($row->fields, [qw(1 2 3)]);
+    is_deeply($row->headers, [qw(m mm mmm)]);
+    ok($row->isFieldRow);
     is($csv->readLine(), undef);
 }
 
 sub test_readLine_with_custom_headers_uses_given_headers : Tests
 {
     my $headers = [qw(m mm mmm)];
-    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n", { 'headers' => $headers });
-    is($csv->headers(), $headers);
+    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6\n", { headers => $headers });
+    is($csv->headers, $headers);
     $csv->readLine();
-    is($csv->headers(), $headers);
+    is($csv->headers, $headers);
 }
 
 sub test_readLines_encloses_csv_rows_in_csv_table : Tests
 {
-    my $csv = CSV->new("a,b,c\n1,2,3\n", { 'headers' => 1 });
+    my $csv = CSV->new("a,b,c\n1,2,3\n", { headers => 1 });
     my $table = $csv->readLines();
     is(ref $table, 'CSV::Table');
-    is_deeply($table->headers(), [qw(a b c)]);
-    my $rows = $table->rows();
-    is_deeply($rows->[0]->fields(), [qw(1 2 3)]);
-    is_deeply($rows->[0]->headers(), [qw(a b c)]);
-    ok($rows->[0]->isFieldRow());
+    is_deeply($table->headers, [qw(a b c)]);
+    my $rows = $table->rows;
+    is_deeply($rows->[0]->fields, [qw(1 2 3)]);
+    is_deeply($rows->[0]->headers, [qw(a b c)]);
+    ok($rows->[0]->isFieldRow);
     is(scalar(@$table), 1);
 }
 
 sub test_readLines_encloses_csv_rows_in_csv_table_without_skipping_headers : Tests
 {
-    my $csv = CSV->new("a,b,c\n1,2,3\n", { 'headers' => 1, 'return_headers' => 1 });
+    my $csv = CSV->new("a,b,c\n1,2,3\n", { headers => 1, return_headers => 1 });
     my $table = $csv->readLines();
     is(ref $table, 'CSV::Table');
-    is_deeply($table->headers(), [qw(a b c)]);
-    my $rows = $table->rows();
-    is_deeply($rows->[0]->fields(), [qw(a b c)]);
-    is_deeply($rows->[0]->headers(), [qw(a b c)]);
-    ok($rows->[0]->isHeaderRow());
-    is_deeply($rows->[1]->fields(), [qw(1 2 3)]);
-    is_deeply($rows->[1]->headers(), [qw(a b c)]);
-    ok($rows->[1]->isFieldRow());
+    is_deeply($table->headers, [qw(a b c)]);
+    my $rows = $table->rows;
+    is_deeply($rows->[0]->fields, [qw(a b c)]);
+    is_deeply($rows->[0]->headers, [qw(a b c)]);
+    ok($rows->[0]->isHeaderRow);
+    is_deeply($rows->[1]->fields, [qw(1 2 3)]);
+    is_deeply($rows->[1]->headers, [qw(a b c)]);
+    ok($rows->[1]->isFieldRow);
     is(scalar(@$table), 2);
 }
 
 sub test_skipBlanks_returns_the_headers_options : Tests
 {
-    my $csv = CSV->new("a,b,c\n1,2,3\n", { 'skip_blanks' => 'BLANK VAL' });
-    is($csv->skipBlanks(), 'BLANK VAL');
+    my $csv = CSV->new("a,b,c\n1,2,3\n", { skip_blanks => 'BLANK VAL' });
+    is($csv->skipBlanks, 'BLANK VAL');
 }
 
 sub test_readLine_assembles_and_returns_rows_with_the_right_headers_and_fields : Tests
@@ -513,7 +567,7 @@ sub test_readLine_assembles_and_returns_rows_with_the_right_headers_and_fields :
     my $row_mod = Test::MockModule->new('CSV::Row');
     $row_mod->mock('new', sub { shift; push(@params, [@_]);  return shift(@rows); });
 
-    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6", { 'headers' => 1 });
+    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6", { headers => 1 });
     is($csv->readLine(), $expected_rows[0]);
     is($csv->readLine(), $expected_rows[1]);
     is($csv->readLine(), undef);
@@ -530,7 +584,7 @@ sub test_readLine_assembles_and_returns_rows_with_the_right_headers_and_fields_c
     my $row_mod = Test::MockModule->new('CSV::Row');
     $row_mod->mock('new', sub { shift; push(@params, [@_]);  return shift(@rows); });
 
-    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6", { 'headers' => [qw(m n o)] });
+    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6", { headers => [qw(m n o)] });
     is($csv->readLine(), $expected_rows[0]);
     is($csv->readLine(), $expected_rows[1]);
     is($csv->readLine(), $expected_rows[2]);
@@ -549,7 +603,7 @@ sub test_readLine_assembles_and_returns_rows_with_the_right_headers_and_fields_r
     my $row_mod = Test::MockModule->new('CSV::Row');
     $row_mod->mock('new', sub { shift; push(@params, [@_]);  return shift(@rows); });
 
-    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6", { 'headers' => 1, 'return_headers' => 1 });
+    my $csv = CSV->new("a,b,c\n1,2,3\n4,5,6", { headers => 1, return_headers => 1 });
     is($csv->readLine(), $expected_rows[0]);
     is($csv->readLine(), $expected_rows[1]);
     is($csv->readLine(), $expected_rows[2]);
@@ -803,6 +857,15 @@ sub test_open_appends_to_a_csv_file : Tests
     open($fh, '<', 't/fixtures/gen_test_csv.txt');
     $str = <$fh>;
     is($str, "Previous content\n1,2,3\na,b,c\n");
+}
+
+sub test_open_and_read_encoding : Tests
+{
+    CSV->open('t/fixtures/gen_test_csv.txt', { encoding => 'UTF-8'}, sub {
+        shift->addRow(["\x{2EA5}","\x{2E92}","\x{2EB6}"]);
+    });
+
+    is_deeply(CSV->read('t/fixtures/gen_test_csv.txt', { encoding => 'UTF-8' }), [["\x{2EA5}","\x{2E92}","\x{2EB6}"]]);
 }
 
 Test::Class->runtests();
