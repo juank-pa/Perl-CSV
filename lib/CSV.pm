@@ -63,6 +63,21 @@ sub new
     return $self;
 }
 
+sub filter
+{
+    my $class = shift;
+    my ($input, $output, $options, $sub) = @_;
+    ($input, $output, $options, $sub) = (undef, undef, $input, $output) if ref($output) eq 'CODE';
+    ($input, $output, $options, $sub) = ($input, undef, $output, $options) if ref($options) eq 'CODE';
+    $input //= *ARGV;
+    $output //= *STDOUT;
+
+    my ($in_options, $out_options) = _split_options($options);
+    my $in_csv = CSV->new($input, $in_options);
+    my $out_csv = CSV->new($output, $out_options);
+    $in_csv->each(sub { $out_csv->addRow($sub->(shift)) });
+}
+
 # Main method of parsing a CSV string.
 # @params
 #   @str      The CSV string to be parsed.
@@ -457,6 +472,27 @@ sub _sanitizeColumn
     $col =~ s/^"|"$//g;
     $col =~ s/""/"/g;
     return $col;
+}
+
+sub _split_options
+{
+    my $options = shift // {};
+
+    my ($in_options, $out_options) = ({}, {});
+    for my $key (keys %$options) {
+        my $new_key;
+        if (($new_key = $key) =~ s/^out_//) {
+            $out_options->{$new_key} = $options->{$key};
+        }
+        elsif (($new_key = $key) =~ s/^in_//) {
+            $in_options->{$new_key} = $options->{$key};
+        }
+        else {
+            $in_options->{$key} = $out_options->{$key} = $options->{$key};
+        }
+    }
+
+    return $in_options, $out_options;
 }
 
 return 1;
