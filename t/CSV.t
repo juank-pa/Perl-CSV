@@ -868,4 +868,71 @@ sub test_open_and_read_encoding : Tests
     is_deeply(CSV->read('t/fixtures/gen_test_csv.txt', { encoding => 'UTF-8' }), [["\x{2EA5}","\x{2E92}","\x{2EB6}"]]);
 }
 
+sub test_filter_reads_from_file_and_writes_to_file : Tests
+{
+    open(my $fhi, '<', 't/fixtures/test_csv.txt');
+    open(my $fho, '>', 't/fixtures/gen_test_csv.txt');
+    CSV->filter($fhi, $fho, {}, sub {
+        my $row = shift;
+        push @$row, 'JK';
+    });
+
+    local $/ = undef;
+    open(my $fh, '<', 't/fixtures/gen_test_csv.txt');
+    is(<$fh>, qq{one,two,three,JK\n123,"456\n+ 2 ""apples"", and grapes",789,JK\na,b,c,d,JK\n});
+}
+
+sub test_filter_defaults_to_STDOUT_if_not_specified : Tests
+{
+    my ($in, $out);
+    my $csv_in_mock = Test::MockObject->new()->mock('each', sub { $in = $_[0]->{io}; $_[1]->([]) });
+    my $csv_out_mock = Test::MockObject->new()->mock('addRow', sub { $out = $_[0]->{io} });
+    my @csv_mocks = ($csv_in_mock, $csv_out_mock);
+    $_->set_false('close') for @csv_mocks;
+    my $csv_mod = Test::MockModule->new('CSV');
+    $csv_mod->mock('new', sub { my $self = shift(@csv_mocks); $self->{io} = $_[1]; $self });
+    open(my $fh, '<', 't/fixtures/test_csv.txt');
+    CSV->filter($fh, {}, sub {
+        my $row = shift;
+        push @$row, 'JK';
+    });
+    is($in, $fh);
+    is($out, *STDOUT);
+}
+
+sub test_filter_defaults_to_ARGV_and_STDOUT_if_not_specified : Tests
+{
+    my ($in, $out);
+    my $csv_in_mock = Test::MockObject->new()->mock('each', sub { $in = $_[0]->{io}; $_[1]->([]) });
+    my $csv_out_mock = Test::MockObject->new()->mock('addRow', sub { $out = $_[0]->{io} });
+    my @csv_mocks = ($csv_in_mock, $csv_out_mock);
+    $_->set_false('close') for @csv_mocks;
+    my $csv_mod = Test::MockModule->new('CSV');
+    $csv_mod->mock('new', sub { my $self = shift(@csv_mocks); $self->{io} = $_[1]; $self });
+    CSV->filter({}, sub {
+        my $row = shift;
+        push @$row, 'JK';
+    });
+    is($in, *ARGV);
+    is($out, *STDOUT);
+}
+
+sub test_filter_reads_splits_options_to_output_and_input_csvs : Tests
+{
+    my ($in_opts, $out_opts);
+    my $csv_in_mock = Test::MockObject->new()->mock('each', sub { $in_opts = $_[0]->{options}; $_[1]->([]) });
+    my $csv_out_mock = Test::MockObject->new()->mock('addRow', sub { $out_opts = $_[0]->{options} });
+    my @csv_mocks = ($csv_in_mock, $csv_out_mock);
+    $_->set_false('close') for @csv_mocks;
+    my $csv_mod = Test::MockModule->new('CSV');
+    $csv_mod->mock('new', sub { my $self = shift(@csv_mocks); $self->{options} = $_[2]; $self });
+    open(my $fh, '<', 't/fixtures/test_csv.txt');
+    CSV->filter($fh, { in_option1 => 'Opt1', out_option2 => 'Opt2', optionx => 'Optx' }, sub {
+        my $row = shift;
+        push @$row, 'JK';
+    });
+    is_deeply($in_opts, { option1 => 'Opt1', optionx => 'Optx' });
+    is_deeply($out_opts, { option2 => 'Opt2', optionx => 'Optx' });
+}
+
 Test::Class->runtests();

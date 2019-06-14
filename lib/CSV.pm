@@ -63,6 +63,24 @@ sub new
     return $self;
 }
 
+# This method is a convenience for building Unix-like filters for CSV data. Each row is yielded
+# to the provided block which can alter it as needed. After the block returns, the row is appended
+# to output altered or not.
+# The input and output arguments can be anything CSV::new accepts (generally string or IO handlers).
+# If not given, they default to *ARGV and *STDOUT.
+# The options parameter is also filtered down to CSV::new after some clever key parsing.
+# Any key beginning with in_ will have that leading identifier stripped and will only be used in
+# the options hashref for the input object. Keys starting with out_ affect only output.
+# All other keys are assigned to both objects.
+# @variants
+#   filter(@options, @sub)
+#   filter(@in, @options, @sub)
+#   filter(@in, @out, @options, @sub)
+# @params
+#   @in       The input handler to read the CSV from. Must be open for reading.
+#   @out      The output handler to write the CSV to. Must be open for writing.
+#   @options  The options sent to the input and output CSV instances.
+#   @sub      The function used to alter the row passed as parameter.
 sub filter
 {
     my $class = shift;
@@ -75,7 +93,11 @@ sub filter
     my ($in_options, $out_options) = _split_options($options);
     my $in_csv = CSV->new($input, $in_options);
     my $out_csv = CSV->new($output, $out_options);
-    $in_csv->each(sub { $out_csv->addRow($sub->(shift)) });
+    $in_csv->each(sub {
+         $sub->(my $row = shift);
+         $out_csv->addRow($row);
+    });
+    $out_csv->close();
 }
 
 # Main method of parsing a CSV string.
@@ -381,6 +403,7 @@ sub close
 {
     my $self = shift;
     close($self->{_io}) if $self->{_io};
+    delete $self->{_io};
 }
 
 # PRIVATE METHODS
